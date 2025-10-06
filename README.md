@@ -35,12 +35,18 @@ It automatically syncs with the currently playing track and applies a customizab
 
 ### Using macOS Terminal
 
-1. cd ~/Downloads
-curl -L -o immersive-art-bg-1.4.3.zip \
-https://github.com/danielc0603/immersive-art-bg/releases/download/v1.4.3/immersive-art-bg-1.4.3.zip
+1. ```
+   cd ~/Downloads
+   curl -L -o immersive-art-bg-1.4.3.zip \
+   https://github.com/danielc0603/immersive-art-bg/releases/download/v1.4.3/immersive-art-bg-1.4.3.zip
+   ```
 
-3. unzip immersive-art-bg-1.4.3.zip -d immersive-art-bg
+2. ```
+   unzip immersive-art-bg-1.4.3.zip -d immersive-art-bg
+   ```
 
-4. DEST="$HOME/Library/Application Support/sh.cider.genten/plugins/com.danielc0603.immersiveartbg"
-mkdir -p "$DEST"
-cp -f immersive-art-bg/* "$DEST/"
+3. ```
+   DEST="$HOME/Library/Application Support/sh.cider.genten/plugins/com.danielc0603.immersiveartbg"
+   mkdir -p "$DEST"
+   cp -f immersive-art-bg/* "$DEST/"
+   ```
