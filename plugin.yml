@@ -6,3 +6,7 @@ author: Daniel
 repo: https://github.com/danielc0603/immersive-art-bg
 main: plugin.js
 icon: icon.png
+tags:
+  - cidermusicplugin
+  - visual
+  - background
