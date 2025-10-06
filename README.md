@@ -17,7 +17,7 @@ It automatically syncs with the currently playing track and applies a customizab
 
 - **Automatic album art detection** — syncs in real-time with the current track.  
 - **Liquid-glass background** — Attempting dynamically blurred backdrop with dim + vignette layers.  
-- **Customizable visual controls** —  
+- **Customizable visual controls:**  
   - **Blur:** 0 – 100 px  
   - **Dim:** 0 – 1  
   - **Vignette:** 0 – 1  
