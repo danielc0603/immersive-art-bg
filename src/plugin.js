@@ -1,208 +1,292 @@
-// Immersive Art BG — draggable panel, smart docking, setup()-based export
+// Immersive Art BG — v1.4.2 (static panel, liquid glass)
 
-function createPlugin() {
-  let started = false, mk, gate, ro, mo;
+async function P() {
+  // Wait up to 5s for MusicKit to initialize
+  let mk = (window.MusicKit && window.MusicKit.getInstance && window.MusicKit.getInstance()) || null;
+  const start = Date.now();
+  while (!mk && Date.now() - start < 5000) {
+    await new Promise(r => setTimeout(r, 100));
+    mk = (window.MusicKit && window.MusicKit.getInstance && window.MusicKit.getInstance()) || null;
+  }
+  if (!mk) { console.warn("[ImmersiveArtBG] MusicKit not ready after timeout"); return; }
 
-  const defaults = { blurPx: 32, dim: 0.35, vignette: 0.35 };
-  const saved = JSON.parse(localStorage.getItem('iab-settings') || '{}');
-  const cfg = { ...defaults, ...saved };
-  const save = () => localStorage.setItem('iab-settings', JSON.stringify(cfg));
+  const DEFAULTS = { blurPx: 32, dim: 0.35, vignette: 0.35 };
+  const cfg = Object.assign({}, DEFAULTS, safeParse(localStorage.getItem("iab-settings")) || {});
+  const IDS = { style: "iab-style", layer: "iab-bg", panel: "iab-panel", btn: "iab-btn" };
+  const $ = (id) => document.getElementById(id);
+  const save = () => localStorage.setItem("iab-settings", JSON.stringify(cfg));
 
-  const ID = { style: 'iab-style', layer: 'iab-bg', panel: 'iab-panel', btn: 'iab-btn' };
-  const $  = id => document.getElementById(id);
+  ensureStyle();
+  ensureLayer();
+  ensurePanel();
+  applyAll();
+  bindEvents();
+  update();
 
-  function ready() {
-    try {
-      if (!window.MusicKit || !MusicKit.getInstance) return false;
-      mk = MusicKit.getInstance();
-      return !!mk && document.readyState !== 'loading' && document.body;
-    } catch { return false; }
+  // ---------- event wiring ----------
+  function bindEvents() {
+    const u = () => { try { update(); } catch (e) { console.warn("[ImmersiveArtBG] update skipped:", e); } };
+    try { mk.addEventListener("mediaItemDidChange", u); } catch {}
+    try { mk.addEventListener("nowPlayingItemDidChange", u); } catch {}
+    try { mk.player?.addEventListener("nowplayingitemchanged", u); } catch {}
   }
 
-  function ensureStyle(){
-    if ($(ID.style)) return;
-    const css = `
-:root{ --iab-blur:${cfg.blurPx}px; --iab-dim:${cfg.dim}; --iab-vignette:${cfg.vignette}; }
-#${ID.layer}{ position:fixed; inset:0; background-size:cover; background-position:center;
-  transform:scale(1.06); pointer-events:none; z-index:0; filter:blur(var(--iab-blur)) !important; }
-#${ID.layer}::after{ content:""; position:absolute; inset:0;
-  background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,var(--iab-vignette)) 100%), rgba(0,0,0,var(--iab-dim)); }
+  // ---------- core updates ----------
+  function update() {
+    const item = nowItem();
+    if (!item) return;
+    const url = artFrom(item, 2000);
+    if (!url) return;
+    setBG(url);
+    applyAll();
+  }
 
-#${ID.btn}{ position:fixed; top:10px; right:86px; width:28px; height:28px; border-radius:50%;
-  display:flex; align-items:center; justify-content:center; background:rgba(30,30,30,.85); color:#fff;
-  border:1px solid rgba(255,255,255,.12); cursor:pointer; z-index:2147483647; backdrop-filter:saturate(120%) blur(6px);
-  -webkit-app-region:no-drag; pointer-events:auto; }
-#${ID.btn}.dock{ position:static; right:auto; top:auto; margin-left:8px; width:26px; height:26px; border-radius:6px; background:rgba(40,40,40,.85); }
+  function nowItem() {
+    return mk.nowPlayingItem || mk.player?.nowPlayingItem || null;
+  }
 
-#${ID.panel}{ position:fixed; width:clamp(260px,24vw,360px); max-height:calc(100vh - 70px); overflow:auto;
-  background:rgba(20,20,20,.92); color:#eee; border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:12px;
-  font:12px/1.3 -apple-system,system-ui; backdrop-filter:saturate(120%) blur(8px); z-index:2147483646;
-  -webkit-app-region:no-drag; pointer-events:auto; display:none; box-shadow:0 10px 30px rgba(0,0,0,.35); cursor:grab; }
-#${ID.panel}:active{ cursor:grabbing; }
-#${ID.panel} h3{ margin:0 0 8px; font:600 13px -apple-system,system-ui; }
-#${ID.panel} .row{ display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; margin:8px 0; }
-#${ID.panel} .row input[type=range]{ width:100%; }
-#${ID.panel} .row .val{ min-width:48px; text-align:right; opacity:.9; }
-#${ID.panel} .reset{ margin-top:10px; width:100%; padding:6px 0; border:none; border-radius:6px; background:#c62828; color:#fff; font-weight:600; cursor:pointer; }
+  function artFrom(item, size) {
+    const u = item && item.attributes && item.attributes.artwork && item.attributes.artwork.url;
+    return typeof u === "string" ? u.replace("{w}x{h}", String(size) + "x" + String(size)) : "";
+  }
+
+  function setBG(url) {
+    ensureLayer();
+    const d = $(IDS.layer);
+    if (d) d.style.backgroundImage = 'url("' + url + '")';
+  }
+
+  function applyAll() {
+    const blur = clamp(Math.round(Number(cfg.blurPx) || 0), 0, 100);
+    const dim  = clamp(Number(cfg.dim) || 0, 0, 1);
+    const vig  = clamp(Number(cfg.vignette) || 0, 0, 1);
+
+    document.documentElement.style.setProperty("--iab-blur", blur + "px");
+    document.documentElement.style.setProperty("--iab-dim", String(dim));
+    document.documentElement.style.setProperty("--iab-vig", String(vig));
+
+    save(); // persist settings
+  }
+
+  // ---------- DOM ----------
+  function ensureLayer() {
+    if ($(IDS.layer)) return;
+    const d = document.createElement("div");
+    d.id = IDS.layer;
+    document.body.prepend(d);
+  }
+
+  function ensureStyle() {
+    if ($(IDS.style)) return;
+
+    const NOISE = encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>"
+      + "<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>"
+      + "<feColorMatrix type='saturate' values='0'/>"
+      + "<feComponentTransfer><feFuncA type='table' tableValues='0 0 0 .02 .04 .06 .08 .10'/></feComponentTransfer>"
+      + "</filter><rect width='100%' height='100%' filter='url(#n)'/></svg>"
+    );
+
+    const css =
+`:root{
+  --iab-blur:${clamp(cfg.blurPx,0,100)}px;
+  --iab-dim:${clamp(cfg.dim,0,1)};
+  --iab-vig:${clamp(cfg.vignette,0,1)};
+  --iab-safe-top:max(12px, env(safe-area-inset-top, 0px));
+  --iab-safe-right:max(12px, env(safe-area-inset-right, 0px));
+  --iab-panel-w:min(360px, calc(100vw - 24px));
+}
+/* background layer (keeps the panel crisp even at 100px) */
+#${IDS.layer}{
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.06);
+  pointer-events: none;
+  isolation: isolate; /* prevents blur bleed into overlays */
+}
+
+/* apply the heavy blur only to the layer’s backdrop */
+#${IDS.layer}::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(var(--iab-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--iab-blur)) !important;
+}
+
+/* dim + vignette overlay */
+#${IDS.layer}::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 50%,
+      rgba(0,0,0,var(--iab-vig)) 0%,
+      rgba(0,0,0,0) 55%,
+      rgba(0,0,0,var(--iab-vig)) 100%),
+    rgba(0,0,0,var(--iab-dim));
+}
+/* keep app above */
+#app{ position:relative; z-index:1; }
+
+/* toggle button */
+#${IDS.btn}{
+  position:fixed; top:calc(var(--iab-safe-top) - 3px); right:calc(var(--iab-safe-right) + 75px);
+  width:30px; height:30px; border-radius:10px;
+  display:flex; align-items:center; justify-content:center;
+  color:#fff; cursor:pointer; border:1px solid rgba(255,255,255,.12);
+  background:rgba(24,24,24,.40);
+  -webkit-app-region:no-drag; pointer-events:auto;
+  backdrop-filter:saturate(160%) blur(10px);
+  transition:transform .12s ease, background .12s ease, border-color .12s ease;
+  z-index:2147483647;
+}
+#${IDS.btn}:hover{ transform:translateY(-1px); background:rgba(24,24,24,.55); border-color:rgba(255,255,255,.2); }
+
+/* liquid-glass panel */
+#${IDS.panel}{
+  position:fixed; top:calc(var(--iab-safe-top) + 36px); right:var(--iab-safe-right);
+  width:var(--iab-panel-w); max-width:360px;
+  color:#e9e9ea; z-index:2147483646; -webkit-app-region:no-drag; pointer-events:auto;
+  background: rgba(20,20,22,.34);
+  backdrop-filter: blur(26px) saturate(185%);
+  -webkit-backdrop-filter: blur(26px) saturate(185%);
+  border-radius:14px; padding:14px 14px 12px; border:1px solid rgba(255,255,255,.12);
+  box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.10);
+  overflow:hidden;
+  will-change: transform, opacity, backdrop-filter;
+}
+#${IDS.panel}::after{
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.45;
+  background-image:url("data:image/svg+xml,${NOISE}");
+  mix-blend-mode:overlay;
+}
+@supports not (backdrop-filter: blur(10px)){
+  #${IDS.panel}{ background: rgba(20,20,22,.92); }
+}
+#${IDS.panel} h3{ margin:2px 0 12px; font:600 15px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
+#${IDS.panel} .row{
+  display:grid; grid-template-columns:auto 1fr auto; align-items:center;
+  gap:12px; margin:12px 0 10px;
+}
+#${IDS.panel} .row label{white-space:nowrap;}
+#${IDS.panel} .row input[type=range]{ width:100%; height:6px; accent-color:#ff4d4f; }
+#${IDS.panel} .row .val{ min-width:52px; text-align:right; opacity:.92; }
+#${IDS.panel} .reset{
+  width:100%; margin-top:12px; padding:11px 12px;
+  border:none; border-radius:10px;
+  font-weight:700; letter-spacing:.2px; color:#fff; cursor:pointer;
+  background:linear-gradient(180deg, #d84a43, #b73934);
+  box-shadow: 0 6px 18px rgba(184,56,51,.35), inset 0 1px 0 rgba(255,255,255,.22);
+}
+#${IDS.panel} .reset:hover{ filter:brightness(1.05); }
+
+/* open/close animation */
+#${IDS.panel}[data-open="0"]{ opacity:0; transform:translateY(-6px); pointer-events:none; }
+#${IDS.panel}[data-open="1"]{ opacity:1; transform:none; transition:opacity .16s ease, transform .16s ease; }
 `;
-    const s=document.createElement('style'); s.id=ID.style; s.textContent=css; document.head.appendChild(s);
+    const style = document.createElement("style");
+    style.id = IDS.style;
+    style.textContent = css;
+    document.head.appendChild(style);
   }
 
-  function ensureLayer(){ if(!$(ID.layer)){ const el=document.createElement('div'); el.id=ID.layer; document.body.prepend(el); } }
-  const artFrom = (item, size) => item?.attributes?.artwork?.url?.replace?.('{w}x{h}',`${size}x${size}`) || '';
-  function setBG(url){ if(!url) return; ensureLayer(); $(ID.layer).style.backgroundImage = `url("${url}")`; }
-  function applyVars(){
-    document.documentElement.style.setProperty('--iab-blur', `${cfg.blurPx}px`);
-    document.documentElement.style.setProperty('--iab-dim', cfg.dim);
-    document.documentElement.style.setProperty('--iab-vignette', cfg.vignette);
-    const el=$(ID.layer); if(el) el.style.filter = `blur(${cfg.blurPx}px)`;
-  }
-  function applyArt(){ setBG(artFrom(MusicKit.getInstance().nowPlayingItem, 2000)); applyVars(); }
-
-  function mkRow(lbl,min,max,step,key){
-    const row=document.createElement('div'); row.className='row';
-    const lab=document.createElement('label'); lab.textContent=lbl;
-    const inp=document.createElement('input'); inp.type='range'; inp.min=min; inp.max=max; inp.step=step; inp.value=cfg[key];
-    const val=document.createElement('div'); val.className='val';
-    const fmt=v=> key==='blurPx'?`${Math.round(v)}px`:(Math.round(v*100)/100);
-    val.textContent=fmt(cfg[key]);
-    inp.oninput=e=>{ cfg[key]=parseFloat(e.target.value); save(); val.textContent=fmt(cfg[key]); applyVars(); };
-    row.append(lab,inp,val); return row;
-  }
-
-  const TOOLBAR_QS = [
-    'header [role="toolbar"]',
-    'header .toolbar, header .topbar, header .window-toolbar',
-    '.titlebar .right, #titlebar .right',
-    'header [data-region="window-controls"] ~ div',
-    '.quick-actions, .header-actions',
-  ];
-  const findToolbar = () => TOOLBAR_QS.map(q=>document.querySelector(q)).find(Boolean) || null;
-
-  function dockButton(btn){
-    const host = findToolbar();
-    if (host) {
-      if (btn.parentElement !== host) host.appendChild(btn);
-      btn.classList.add('dock');
-      return true;
-    }
-    if (btn.parentElement !== document.body) document.body.appendChild(btn);
-    btn.classList.remove('dock');
-    return false;
-  }
-
-  function positionPanel(panel){
-    const pad = 12, vw = window.innerWidth, vh = window.innerHeight;
-    let pos = JSON.parse(localStorage.getItem('iab-panel-pos') || 'null');
-    if (!pos) {
-      const btn = $(ID.btn);
-      if (btn) {
-        const r = btn.getBoundingClientRect();
-        pos = { left: Math.min(vw - 300, r.right - 280), top: r.bottom + 10 };
-      } else {
-        pos = { left: vw - 360, top: 50 };
-      }
-    }
-    pos.left = Math.min(vw - panel.offsetWidth - pad, Math.max(pad, pos.left));
-    pos.top  = Math.min(vh - panel.offsetHeight - pad, Math.max(pad, pos.top));
-    panel.style.left = `${pos.left}px`;
-    panel.style.top  = `${pos.top}px`;
-    localStorage.setItem('iab-panel-pos', JSON.stringify(pos));
-  }
-
-  function makeDraggable(panel){
-    let dragging = false, offsetX = 0, offsetY = 0;
-    panel.addEventListener('mousedown', e=>{
-      if (e.target.closest('input,button')) return;
-      dragging = true;
-      offsetX = e.clientX - panel.offsetLeft;
-      offsetY = e.clientY - panel.offsetTop;
-      panel.style.cursor = 'grabbing';
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', e=>{
-      if (!dragging) return;
-      let left = e.clientX - offsetX;
-      let top = e.clientY - offsetY;
-      const vw = window.innerWidth, vh = window.innerHeight;
-      left = Math.min(vw - panel.offsetWidth, Math.max(0, left));
-      top = Math.min(vh - panel.offsetHeight, Math.max(0, top));
-      panel.style.left = `${left}px`;
-      panel.style.top = `${top}px`;
-    });
-    document.addEventListener('mouseup', ()=>{
-      if (dragging) {
-        dragging = false;
-        panel.style.cursor = 'grab';
-        localStorage.setItem('iab-panel-pos', JSON.stringify({ left: panel.offsetLeft, top: panel.offsetTop }));
-      }
-    });
-  }
-
-  function ensureControls(){
-    let btn = $(ID.btn);
-    if (!btn){
-      btn = document.createElement('button');
-      btn.id = ID.btn;
-      btn.title = 'Immersive Art Settings';
-      btn.textContent = '🎨';
+  function ensurePanel() {
+    let btn = $(IDS.btn);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = IDS.btn;
+      btn.title = "Immersive Art Settings";
+      btn.textContent = "🎨";
+      ["mousedown","click"].forEach(ev => btn.addEventListener(ev, e => e.stopPropagation()));
       document.body.appendChild(btn);
     }
 
-    let panel = $(ID.panel);
-    if (!panel){
-      panel = document.createElement('div'); panel.id = ID.panel;
-      const h=document.createElement('h3'); h.textContent='Immersive Art BG'; panel.appendChild(h);
-      panel.appendChild(mkRow('Blur',0,100,1,'blurPx'));
-      panel.appendChild(mkRow('Dim',0,1,0.01,'dim'));
-      panel.appendChild(mkRow('Vignette',0,1,0.01,'vignette'));
-      const resetBtn=document.createElement('button'); resetBtn.className='reset'; resetBtn.textContent='Reset to Defaults';
-      resetBtn.onclick=()=>{ Object.assign(cfg, defaults); save(); applyVars();
-        const rows=panel.querySelectorAll('.row'); const vals=[cfg.blurPx,cfg.dim,cfg.vignette];
-        rows.forEach((r,i)=>{ const inp=r.querySelector('input[type=range]'); const val=r.querySelector('.val');
-          inp.value=vals[i]; val.textContent=(i===0?`${Math.round(vals[i])}px`:(Math.round(vals[i]*100)/100)); });
+    let panel = $(IDS.panel);
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = IDS.panel;
+      panel.setAttribute("data-open", "0");
+      ["mousedown","click"].forEach(ev => panel.addEventListener(ev, e => e.stopPropagation()));
+
+      const h = document.createElement("h3");
+      h.textContent = "Immersive Art BG";
+      panel.appendChild(h);
+
+      panel.appendChild(sliderRow("Blur",     0, 100, 1,    "blurPx"));
+      panel.appendChild(sliderRow("Dim",      0,   1, 0.01, "dim"));
+      panel.appendChild(sliderRow("Vignette", 0,   1, 0.01, "vignette"));
+
+      const reset = document.createElement("button");
+      reset.className = "reset";
+      reset.textContent = "Reset to Defaults";
+      reset.onclick = () => {
+        cfg.blurPx = DEFAULTS.blurPx;
+        cfg.dim = DEFAULTS.dim;
+        cfg.vignette = DEFAULTS.vignette;
+        refreshRows(panel);
+        applyAll();
       };
+      panel.appendChild(reset);
+
       document.body.appendChild(panel);
-      makeDraggable(panel);
     }
 
-    btn.onclick=()=>{
-      const show = panel.style.display!=='block';
-      panel.style.display = show ? 'block' : 'none';
-      if (show) positionPanel(panel);
+    const setOpen = (open) => $(IDS.panel).setAttribute("data-open", open ? "1" : "0");
+    btn.onclick = () => setOpen($(IDS.panel).getAttribute("data-open") !== "1");
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $(IDS.panel).getAttribute("data-open") === "1") setOpen(false);
+    });
+  }
+
+  function sliderRow(label, min, max, step, key) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const lab = document.createElement("label");
+    lab.textContent = label;
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(cfg[key]);
+
+    const val = document.createElement("div");
+    val.className = "val";
+
+    const fmt = (x) => key === "blurPx" ? (Math.round(x) + "px") : String(Math.round(x * 100) / 100);
+    val.textContent = fmt(cfg[key]);
+
+    input.oninput = (e) => {
+      const v = parseFloat(e.target.value);
+      cfg[key] = key === "blurPx" ? clamp(Math.round(v), 0, 100) : clamp(v, 0, 1);
+      val.textContent = fmt(cfg[key]);
+      applyAll();
     };
 
-    dockButton(btn);
-
-    ro = new ResizeObserver(()=>{ const panel=$(ID.panel); if (panel && panel.style.display==='block') positionPanel(panel); });
-    ro.observe(document.documentElement);
-
-    mo = new MutationObserver(()=>{ const btn=$(ID.btn), panel=$(ID.panel);
-      dockButton(btn); if (panel && panel.style.display==='block') positionPanel(panel); });
-    mo.observe(document.body, { childList:true, subtree:true, attributes:true });
+    row.append(lab, input, val);
+    return row;
   }
 
-  function start(){
-    if (started) return; started = true;
-    ensureStyle(); ensureLayer(); ensureControls(); applyVars();
-    try {
-      mk.addEventListener('mediaItemDidChange', applyArt);
-      mk.addEventListener('nowPlayingItemDidChange', applyArt);
-    } catch {}
-    applyArt();
+  function refreshRows(panel) {
+    const vals = [cfg.blurPx, cfg.dim, cfg.vignette];
+    panel.querySelectorAll(".row").forEach((r, i) => {
+      const input = r.querySelector("input[type=range]");
+      const readout = r.querySelector(".val");
+      input.value = String(vals[i]);
+      readout.textContent = i === 0 ? (Math.round(vals[i]) + "px") : String(Math.round(vals[i] * 100) / 100);
+    });
   }
 
-  return {
-    setup(/* ctx */){
-      gate = setInterval(() => { if (ready()) { clearInterval(gate); start(); } }, 250);
-      return {
-        onClose(){ try{ clearInterval(gate); ro&&ro.disconnect(); mo&&mo.disconnect(); }catch{} }
-      };
-    },
-    identifier: 'com.danielc0603.immersiveartbg',
-    meta: { identifier: 'com.danielc0603.immersiveartbg', name: 'Immersive Art BG', version: '1.4.1' }
-  };
+  // ---------- utils ----------
+  function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 }
 
-const plugin = createPlugin();
-export default plugin;
+export { P as default };
