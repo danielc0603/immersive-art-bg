@@ -5,6 +5,11 @@
 **Compatibility:** Cider 1.4.2+ (macOS, Windows, Linux)
 
 ---
+## Note
+
+Only tested  on macOS, unsure if it has Windows/Linux Compatability
+
+---
 
 ## 🖼️ Overview
 
@@ -28,8 +33,14 @@ It automatically syncs with the currently playing track and applies a customizab
 
 ## 📦 Installation
 
-### From GitHub Release
-1. Download the latest release ZIP:  
-   [**immersive-art-bg.zip**](https://github.com/danielc0603/immersive-art-bg/releases/latest/download/immersive-art-bg.zip)
-2. Unzip the file.
-3. Move the extracted folder to:
+### Using macOS Terminal
+
+1. cd ~/Downloads
+   curl -L -o immersive-art-bg-1.4.3.zip \
+   https://github.com/danielc0603/immersive-art-bg/releases/download/v1.4.3/immersive-art-bg-1.4.3.zip
+
+2. unzip immersive-art-bg-1.4.3.zip -d immersive-art-bg
+
+3. DEST="$HOME/Library/Application Support/sh.cider.genten/plugins/com.danielc0603.immersiveartbg"
+   mkdir -p "$DEST"
+   cp -f immersive-art-bg/* "$DEST/"
