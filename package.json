@@ -1,0 +1,17 @@
+{
+  "name": "immersive-art-bg-market",
+  "version": "1.0.0",
+  "main": "plugin.js",
+  "scripts": {
+    "build": "vite build",
+    "prepare-marketplace": "npm run build && mkdir -p publish && cp dist/plugin.js plugin.yml publish/"
+  },
+  "keywords": [],
+  "author": "Daniel",
+  "license": "ISC",
+  "description": "Blurred album art as immersive background for Cider",
+  "devDependencies": {
+    "vite": "^6.3.6",
+    "vue-tsc": "^3.1.0"
+  }
+}
