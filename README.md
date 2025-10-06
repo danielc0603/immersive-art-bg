@@ -15,20 +15,20 @@ It automatically syncs with the currently playing track and applies a customizab
 
 ## ✨ Features
 
-- 🧠 **Automatic album art detection** — syncs in real-time with the current track.  
-- 💧 **Liquid-glass background** — dynamically blurred backdrop with dim + vignette layers.  
-- ⚙️ **Customizable visual controls** —  
+- **Automatic album art detection** — syncs in real-time with the current track.  
+- **Liquid-glass background** — Attempting dynamically blurred backdrop with dim + vignette layers.  
+- **Customizable visual controls** —  
   - **Blur:** 0 – 100 px  
   - **Dim:** 0 – 1  
   - **Vignette:** 0 – 1  
-- 💾 **Settings saved locally** (persist across sessions).  
-- 🪟 **Static control panel** — clean, non-draggable, and always accessible.  
+- **Settings saved locally** (persist across sessions).  
+- **Static control panel** — clean, non-draggable, and always accessible.  
 
 ---
 
 ## 📦 Installation
 
-### 🧭 Option A: From GitHub Release
+### From GitHub Release
 1. Download the latest release ZIP:  
    [**immersive-art-bg.zip**](https://github.com/danielc0603/immersive-art-bg/releases/latest/download/immersive-art-bg.zip)
 2. Unzip the file.
