@@ -2,7 +2,7 @@
   "name": "Immersive Art BG",
   "identifier": "com.danielc0603.immersiveartbg",
   "description": "Blurs and dims album art as an immersive background with live controls.",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "author": "Daniel Centeno",
   "repository": "danielc0603/immersive-art-bg",
   "icon": "https://raw.githubusercontent.com/danielc0603/immersive-art-bg/main/publish/icon.png"
