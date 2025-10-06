@@ -50,3 +50,15 @@ It automatically syncs with the currently playing track and applies a customizab
    mkdir -p "$DEST"
    cp -f immersive-art-bg/* "$DEST/"
    ```
+
+
+Until approved by admin, can be run locally from '/Users/yourusername/Library/Application Support/sh.cider.genten/plugins' folder:
+  Cider -> Devtools -> Console
+  ```
+  await (async () => {
+  const pluginPath = '/Users/yourusername/Library/Application Support/sh.cider.genten/plugins/com.danielc0603.immersiveartbg/plugin.js';
+  const mod = await import('file://' + encodeURI(pluginPath));
+  mod.default?.();
+  console.log("[ImmersiveArtBG] manually loaded from local path.");
+})();
+```
