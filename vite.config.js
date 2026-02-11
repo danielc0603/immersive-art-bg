@@ -7,7 +7,13 @@ export default defineConfig({
       formats: ["es"],
       fileName: () => "plugin.js"
     },
-    outDir: "dist",
-    emptyOutDir: true
+    rollupOptions: {
+      output: {
+        // This matters: keep exports as ESM
+        exports: "named",
+      }
+    },
+    minify: true,
+    sourcemap: false
   }
 });

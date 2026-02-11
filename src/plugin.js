@@ -1,292 +1,592 @@
-// Immersive Art BG — v1.4.2 (static panel, liquid glass)
+const DEFAULTS = {
+  pollMs: 900,
+  blurPx: 28,
+  dim: 0.35,
+  vignette: 0.35,
+  minArt: 1400,
+  saturate: 1.1,
+  contrast: 1,
+  brightness: 1
+};
 
-async function P() {
-  // Wait up to 5s for MusicKit to initialize
-  let mk = (window.MusicKit && window.MusicKit.getInstance && window.MusicKit.getInstance()) || null;
-  const start = Date.now();
-  while (!mk && Date.now() - start < 5000) {
-    await new Promise(r => setTimeout(r, 100));
-    mk = (window.MusicKit && window.MusicKit.getInstance && window.MusicKit.getInstance()) || null;
+const CFG = { ...DEFAULTS };
+
+const NOW_PLAYING = "http://localhost:10767/api/v1/playback/now-playing";
+
+const Z_BG = 2147483646;
+const Z_UI = 2147483647;
+
+const LS_KEY = "ciderArtBgSettings_v2";
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
+  } catch {
+    return { ...DEFAULTS };
   }
-  if (!mk) { console.warn("[ImmersiveArtBG] MusicKit not ready after timeout"); return; }
+}
 
-  const DEFAULTS = { blurPx: 32, dim: 0.35, vignette: 0.35 };
-  const cfg = Object.assign({}, DEFAULTS, safeParse(localStorage.getItem("iab-settings")) || {});
-  const IDS = { style: "iab-style", layer: "iab-bg", panel: "iab-panel", btn: "iab-btn" };
-  const $ = (id) => document.getElementById(id);
-  const save = () => localStorage.setItem("iab-settings", JSON.stringify(cfg));
+function saveSettings(s) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+  } catch {}
+}
 
-  ensureStyle();
-  ensureLayer();
-  ensurePanel();
-  applyAll();
-  bindEvents();
-  update();
+function applySettings(s) {
+  const r = document.documentElement.style;
+  r.setProperty("--cab-blur", `${s.blurPx}px`);
+  r.setProperty("--cab-dim", String(s.dim));
+  r.setProperty("--cab-vig", String(s.vignette));
+  r.setProperty("--cab-sat", String(s.saturate));
+  r.setProperty("--cab-ct", String(s.contrast));
+  r.setProperty("--cab-br", String(s.brightness));
+}
 
-  // ---------- event wiring ----------
-  function bindEvents() {
-    const u = () => { try { update(); } catch (e) { console.warn("[ImmersiveArtBG] update skipped:", e); } };
-    try { mk.addEventListener("mediaItemDidChange", u); } catch {}
-    try { mk.addEventListener("nowPlayingItemDidChange", u); } catch {}
-    try { mk.player?.addEventListener("nowplayingitemchanged", u); } catch {}
+const resolveArtwork = (art) => {
+  if (!art?.url) return null;
+  const w = Math.max(CFG.minArt, Number(art.width) || 0);
+  const h = Math.max(CFG.minArt, Number(art.height) || 0);
+  return art.url.replace("{w}", String(w)).replace("{h}", String(h));
+};
+
+const preload = (url) =>
+  new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(url);
+    img.onerror = rej;
+    img.src = url;
+  });
+
+const makeKey = (info) => {
+  const pp = info?.playParams || {};
+  return pp.catalogId
+    ? `catalog:${pp.catalogId}`
+    : pp.reportingId
+    ? `reporting:${pp.reportingId}`
+    : pp.id
+    ? `id:${pp.id}`
+    : `${info?.name}|${info?.artistName}|${info?.albumName}|${info?.durationInMillis}`;
+};
+
+function disableImmersive() {
+  const selectors = [
+    "#adaptive-bg-container",
+    "#adaptive-bg",
+    ".top-blurmap",
+    ".blurmap-container",
+    ".blurmap-container canvas",
+    ".top-blurmap canvas",
+    "canvas"
+  ];
+
+  const nodes = [];
+  for (const sel of selectors) nodes.push(...document.querySelectorAll(sel));
+
+  const unique = Array.from(new Set(nodes)).filter((el) => {
+    if (el.tagName.toLowerCase() !== "canvas") return true;
+    const r = el.getBoundingClientRect();
+    return r.width >= innerWidth * 0.85 && r.height >= innerHeight * 0.85;
+  });
+
+  for (const el of unique) {
+    el.style.setProperty("opacity", "0", "important");
+    el.style.setProperty("visibility", "hidden", "important");
+    el.style.setProperty("pointer-events", "none", "important");
+    el.style.setProperty("filter", "none", "important");
+    el.style.setProperty("background", "transparent", "important");
+
+    if (
+      el.id === "adaptive-bg-container" ||
+      el.id === "adaptive-bg" ||
+      el.classList?.contains("blurmap-container") ||
+      el.classList?.contains("top-blurmap") ||
+      el.tagName.toLowerCase() === "canvas"
+    ) {
+      el.style.setProperty("display", "none", "important");
+    }
+
+    el.dataset._ciderArtBgDisabled = "1";
+  }
+}
+
+function ensureBgLayer(settings) {
+  document.getElementById("cider-art-bg")?.remove();
+  document.getElementById("cider-art-bg-style")?.remove();
+
+  const style = document.createElement("style");
+  style.id = "cider-art-bg-style";
+  style.textContent = `
+    :root{
+      --cab-blur: ${settings.blurPx}px;
+      --cab-dim: ${settings.dim};
+      --cab-vig: ${settings.vignette};
+      --cab-sat: ${settings.saturate};
+      --cab-ct: ${settings.contrast};
+      --cab-br: ${settings.brightness};
+    }
+
+    #cider-art-bg {
+      position: fixed;
+      inset: 0;
+      z-index: ${Z_BG};
+      pointer-events: none;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      transform: scale(1.05);
+      filter: blur(var(--cab-blur)) saturate(var(--cab-sat)) contrast(var(--cab-ct)) brightness(var(--cab-br));
+      opacity: 0;
+      transition: opacity 350ms ease;
+    }
+
+    #cider-art-bg::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+        circle at center,
+        rgba(0,0,0,0) 0%,
+        rgba(0,0,0,0) 70%,
+        rgba(0,0,0,var(--cab-vig)) 100%
+      );
+    }
+
+    #cider-art-bg::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,var(--cab-dim));
+    }
+
+    #cab-ui { position: relative; z-index: ${Z_UI}; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+
+    #cab-btn {
+      width: 28px; height: 28px;
+      border-radius: 9px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
+      color: white;
+      cursor: pointer;
+      display:flex; align-items:center; justify-content:center;
+      user-select: none;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+      backdrop-filter: blur(10px) saturate(1.25);
+      -webkit-backdrop-filter: blur(10px) saturate(1.25);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.28);
+      transition: transform 120ms ease, filter 120ms ease, background 120ms ease;
+    }
+    #cab-btn:hover { filter: brightness(1.15); background: rgba(255,255,255,0.085); }
+    #cab-btn:active { transform: scale(0.96); }
+
+    #cab-panel {
+      position: absolute;
+      right: 0;
+      top: 34px;
+      width: 320px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: linear-gradient(180deg, rgba(30,30,35,0.62), rgba(18,18,22,0.55));
+      color: rgba(255,255,255,0.92);
+      padding: 14px 14px 12px;
+      backdrop-filter: blur(18px) saturate(1.35);
+      -webkit-backdrop-filter: blur(18px) saturate(1.35);
+      box-shadow: 0 18px 70px rgba(0,0,0,0.55);
+      display: none;
+      overflow: hidden;
+    }
+    #cab-panel.open { display:block; }
+
+    #cab-panel::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background: radial-gradient(circle at 20% 0%, rgba(255,255,255,0.10), transparent 45%),
+                  radial-gradient(circle at 90% 15%, rgba(255,255,255,0.07), transparent 40%);
+      pointer-events:none;
+    }
+
+    .cab-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom: 10px;
+      position: relative;
+      z-index: 1;
+    }
+    .cab-title{
+      display:flex;
+      flex-direction:column;
+      gap: 2px;
+    }
+    .cab-title .t1{
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+      color: rgba(255,255,255,0.92);
+    }
+    .cab-title .t2{
+      font-size: 11px;
+      opacity: 0.65;
+    }
+
+    #cab-close{
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      user-select:none;
+      transition: filter 120ms ease, transform 120ms ease, background 120ms ease;
+      position: relative;
+      z-index: 1;
+    }
+    #cab-close:hover{ filter: brightness(1.15); background: rgba(255,255,255,0.085); }
+    #cab-close:active{ transform: scale(0.96); }
+
+    .cab-grid{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cab-row{
+      padding: 10px 10px 9px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .cab-row label{
+      font-size: 12px;
+      opacity: 0.9;
+      display:flex;
+      justify-content:space-between;
+      align-items:baseline;
+      margin-bottom: 8px;
+    }
+    .cab-row label span:last-child{
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .cab-row input[type="range"]{
+      width: 100%;
+      height: 18px;
+      background: transparent;
+      accent-color: rgba(255,255,255,0.92);
+    }
+
+    .cab-actions{
+      display:flex;
+      gap: 10px;
+      margin-top: 12px;
+      position: relative;
+      z-index: 1;
+    }
+    .cab-actions button{
+      flex: 1;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.92);
+      padding: 10px 10px;
+      cursor: pointer;
+      transition: filter 120ms ease, transform 120ms ease, background 120ms ease;
+    }
+    .cab-actions button:hover{ filter: brightness(1.12); background: rgba(255,255,255,0.09); }
+    .cab-actions button:active{ transform: scale(0.98); }
+  `;
+  document.head.appendChild(style);
+
+  const bg = document.createElement("div");
+  bg.id = "cider-art-bg";
+  document.body.appendChild(bg);
+
+  const uiRoot =
+    document.querySelector("#q-app") ||
+    document.querySelector(".q-layout") ||
+    document.querySelector("#app") ||
+    document.querySelector("#root");
+
+  if (uiRoot) {
+    uiRoot.style.setProperty("position", "relative", "important");
+    uiRoot.style.setProperty("z-index", String(Z_UI), "important");
   }
 
-  // ---------- core updates ----------
-  function update() {
-    const item = nowItem();
-    if (!item) return;
-    const url = artFrom(item, 2000);
+  return bg;
+}
+
+function findTopRightSlot() {
+  const candidates = [
+    ".q-header .q-toolbar",
+    "header .q-toolbar",
+    ".topbar",
+    "header",
+    ".titlebar",
+    "#q-app header"
+  ];
+
+  for (const sel of candidates) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+
+    const buttons = el.querySelectorAll("button, .q-btn, [role='button']");
+    if (buttons && buttons.length) {
+      const parent = buttons[buttons.length - 1].parentElement || el;
+      return parent;
+    }
+
+    return el;
+  }
+
+  const fallback = document.createElement("div");
+  fallback.style.position = "fixed";
+  fallback.style.top = "10px";
+  fallback.style.right = "16px";
+  fallback.style.zIndex = String(Z_UI);
+  document.body.appendChild(fallback);
+  return fallback;
+}
+
+// ---- runtime state ----
+let bg = null;
+let lastKey = null;
+let inFlight = false;
+let timer = null;
+let obs = null;
+let settings = null;
+
+
+let onDocClick = null;
+
+async function tick() {
+  if (inFlight) return;
+  inFlight = true;
+
+  try {
+    disableImmersive();
+
+    const data = await fetch(NOW_PLAYING).then((r) => r.json());
+    const info = data?.info;
+    if (!info) return;
+
+    const key = makeKey(info);
+    if (!key || key === lastKey) return;
+    lastKey = key;
+
+    const url = resolveArtwork(info.artwork);
     if (!url) return;
-    setBG(url);
-    applyAll();
+
+    await preload(url);
+
+    bg.style.opacity = "0";
+    setTimeout(() => {
+      bg.style.backgroundImage = `url("${url}")`;
+      bg.style.opacity = "1";
+      disableImmersive();
+    }, 70);
+  } catch (e) {
+    
+  } finally {
+    inFlight = false;
+  }
+}
+
+function mountControls(getSettings, setSettings) {
+  document.getElementById("cab-ui")?.remove();
+
+  const wrap = document.createElement("div");
+  wrap.id = "cab-ui";
+
+  wrap.innerHTML = `
+    <button id="cab-btn" title="Background Settings">🎨</button>
+    <div id="cab-panel">
+      <div class="cab-head">
+        <div class="cab-title">
+          <div class="t1">Background Settings</div>
+          <div class="t2">Live adjustments</div>
+        </div>
+        <div id="cab-close">✕</div>
+      </div>
+
+      <div class="cab-grid">
+        <div class="cab-row">
+          <label><span>Blur</span><span id="val-blur"></span></label>
+          <input id="rng-blur" type="range" min="0" max="80" step="1">
+        </div>
+
+        <div class="cab-row">
+          <label><span>Dim</span><span id="val-dim"></span></label>
+          <input id="rng-dim" type="range" min="0" max="0.85" step="0.01">
+        </div>
+
+        <div class="cab-row">
+          <label><span>Vignette</span><span id="val-vig"></span></label>
+          <input id="rng-vig" type="range" min="0" max="0.9" step="0.01">
+        </div>
+
+        <div class="cab-row">
+          <label><span>Saturation</span><span id="val-sat"></span></label>
+          <input id="rng-sat" type="range" min="0" max="1.6" step="0.01">
+        </div>
+
+        <div class="cab-row">
+          <label><span>Contrast</span><span id="val-ct"></span></label>
+          <input id="rng-ct" type="range" min="0.6" max="1.6" step="0.01">
+        </div>
+
+        <div class="cab-row">
+          <label><span>Brightness</span><span id="val-br"></span></label>
+          <input id="rng-br" type="range" min="0.6" max="1.6" step="0.01">
+        </div>
+      </div>
+
+      <div class="cab-actions">
+        <button id="cab-reset">Reset</button>
+        <button id="cab-hide">Hide UI</button>
+      </div>
+    </div>
+  `;
+
+  const slot = findTopRightSlot();
+  slot.appendChild(wrap);
+
+  const panel = wrap.querySelector("#cab-panel");
+  const btn = wrap.querySelector("#cab-btn");
+  const close = wrap.querySelector("#cab-close");
+
+  const q = (sel) => wrap.querySelector(sel);
+
+  function syncUI(s) {
+    q("#rng-blur").value = s.blurPx;
+    q("#rng-dim").value = s.dim;
+    q("#rng-vig").value = s.vignette;
+    q("#rng-sat").value = s.saturate;
+    q("#rng-ct").value = s.contrast;
+    q("#rng-br").value = s.brightness;
+
+    q("#val-blur").textContent = `${s.blurPx}px`;
+    q("#val-dim").textContent = `${Math.round(s.dim * 100)}%`;
+    q("#val-vig").textContent = `${Math.round(s.vignette * 100)}%`;
+    q("#val-sat").textContent = s.saturate.toFixed(2);
+    q("#val-ct").textContent = s.contrast.toFixed(2);
+    q("#val-br").textContent = s.brightness.toFixed(2);
   }
 
-  function nowItem() {
-    return mk.nowPlayingItem || mk.player?.nowPlayingItem || null;
+  function update(partial) {
+    const next = { ...getSettings(), ...partial };
+    setSettings(next);
+    syncUI(next);
   }
 
-  function artFrom(item, size) {
-    const u = item && item.attributes && item.attributes.artwork && item.attributes.artwork.url;
-    return typeof u === "string" ? u.replace("{w}x{h}", String(size) + "x" + String(size)) : "";
-  }
+  btn.addEventListener("click", () => panel.classList.toggle("open"));
+  close.addEventListener("click", () => panel.classList.remove("open"));
 
-  function setBG(url) {
-    ensureLayer();
-    const d = $(IDS.layer);
-    if (d) d.style.backgroundImage = 'url("' + url + '")';
-  }
 
-  function applyAll() {
-    const blur = clamp(Math.round(Number(cfg.blurPx) || 0), 0, 100);
-    const dim  = clamp(Number(cfg.dim) || 0, 0, 1);
-    const vig  = clamp(Number(cfg.vignette) || 0, 0, 1);
+  try {
+    if (onDocClick) document.removeEventListener("click", onDocClick);
+  } catch {}
 
-    document.documentElement.style.setProperty("--iab-blur", blur + "px");
-    document.documentElement.style.setProperty("--iab-dim", String(dim));
-    document.documentElement.style.setProperty("--iab-vig", String(vig));
+  onDocClick = (e) => {
+    if (!panel.classList.contains("open")) return;
+    if (wrap.contains(e.target)) return;
+    panel.classList.remove("open");
+  };
 
-    save(); // persist settings
-  }
+  document.addEventListener("click", onDocClick);
 
-  // ---------- DOM ----------
-  function ensureLayer() {
-    if ($(IDS.layer)) return;
-    const d = document.createElement("div");
-    d.id = IDS.layer;
-    document.body.prepend(d);
-  }
+  q("#rng-blur").addEventListener("input", (e) => update({ blurPx: Number(e.target.value) }));
+  q("#rng-dim").addEventListener("input", (e) => update({ dim: Number(e.target.value) }));
+  q("#rng-vig").addEventListener("input", (e) => update({ vignette: Number(e.target.value) }));
+  q("#rng-sat").addEventListener("input", (e) => update({ saturate: Number(e.target.value) }));
+  q("#rng-ct").addEventListener("input", (e) => update({ contrast: Number(e.target.value) }));
+  q("#rng-br").addEventListener("input", (e) => update({ brightness: Number(e.target.value) }));
 
-  function ensureStyle() {
-    if ($(IDS.style)) return;
+  q("#cab-reset").addEventListener("click", () => update({ ...DEFAULTS }));
+  q("#cab-hide").addEventListener("click", () => wrap.remove());
 
-    const NOISE = encodeURIComponent(
-      "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>"
-      + "<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>"
-      + "<feColorMatrix type='saturate' values='0'/>"
-      + "<feComponentTransfer><feFuncA type='table' tableValues='0 0 0 .02 .04 .06 .08 .10'/></feComponentTransfer>"
-      + "</filter><rect width='100%' height='100%' filter='url(#n)'/></svg>"
-    );
-
-    const css =
-`:root{
-  --iab-blur:${clamp(cfg.blurPx,0,100)}px;
-  --iab-dim:${clamp(cfg.dim,0,1)};
-  --iab-vig:${clamp(cfg.vignette,0,1)};
-  --iab-safe-top:max(12px, env(safe-area-inset-top, 0px));
-  --iab-safe-right:max(12px, env(safe-area-inset-right, 0px));
-  --iab-panel-w:min(360px, calc(100vw - 24px));
-}
-/* background layer (keeps the panel crisp even at 100px) */
-#${IDS.layer}{
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background-size: cover;
-  background-position: center;
-  transform: scale(1.06);
-  pointer-events: none;
-  isolation: isolate; /* prevents blur bleed into overlays */
+  syncUI(getSettings());
 }
 
-/* apply the heavy blur only to the layer’s backdrop */
-#${IDS.layer}::before{
-  content: "";
-  position: absolute;
-  inset: 0;
-  backdrop-filter: blur(var(--iab-blur)) !important;
-  -webkit-backdrop-filter: blur(var(--iab-blur)) !important;
-}
+export function start() {
+  settings = loadSettings();
+  bg = ensureBgLayer(settings);
+  applySettings(settings);
 
-/* dim + vignette overlay */
-#${IDS.layer}::after{
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at 50% 50%,
-      rgba(0,0,0,var(--iab-vig)) 0%,
-      rgba(0,0,0,0) 55%,
-      rgba(0,0,0,var(--iab-vig)) 100%),
-    rgba(0,0,0,var(--iab-dim));
-}
-/* keep app above */
-#app{ position:relative; z-index:1; }
-
-/* toggle button */
-#${IDS.btn}{
-  position:fixed; top:calc(var(--iab-safe-top) - 3px); right:calc(var(--iab-safe-right) + 75px);
-  width:30px; height:30px; border-radius:10px;
-  display:flex; align-items:center; justify-content:center;
-  color:#fff; cursor:pointer; border:1px solid rgba(255,255,255,.12);
-  background:rgba(24,24,24,.40);
-  -webkit-app-region:no-drag; pointer-events:auto;
-  backdrop-filter:saturate(160%) blur(10px);
-  transition:transform .12s ease, background .12s ease, border-color .12s ease;
-  z-index:2147483647;
-}
-#${IDS.btn}:hover{ transform:translateY(-1px); background:rgba(24,24,24,.55); border-color:rgba(255,255,255,.2); }
-
-/* liquid-glass panel */
-#${IDS.panel}{
-  position:fixed; top:calc(var(--iab-safe-top) + 36px); right:var(--iab-safe-right);
-  width:var(--iab-panel-w); max-width:360px;
-  color:#e9e9ea; z-index:2147483646; -webkit-app-region:no-drag; pointer-events:auto;
-  background: rgba(20,20,22,.34);
-  backdrop-filter: blur(26px) saturate(185%);
-  -webkit-backdrop-filter: blur(26px) saturate(185%);
-  border-radius:14px; padding:14px 14px 12px; border:1px solid rgba(255,255,255,.12);
-  box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.10);
-  overflow:hidden;
-  will-change: transform, opacity, backdrop-filter;
-}
-#${IDS.panel}::after{
-  content:""; position:absolute; inset:0; pointer-events:none; opacity:.45;
-  background-image:url("data:image/svg+xml,${NOISE}");
-  mix-blend-mode:overlay;
-}
-@supports not (backdrop-filter: blur(10px)){
-  #${IDS.panel}{ background: rgba(20,20,22,.92); }
-}
-#${IDS.panel} h3{ margin:2px 0 12px; font:600 15px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
-#${IDS.panel} .row{
-  display:grid; grid-template-columns:auto 1fr auto; align-items:center;
-  gap:12px; margin:12px 0 10px;
-}
-#${IDS.panel} .row label{white-space:nowrap;}
-#${IDS.panel} .row input[type=range]{ width:100%; height:6px; accent-color:#ff4d4f; }
-#${IDS.panel} .row .val{ min-width:52px; text-align:right; opacity:.92; }
-#${IDS.panel} .reset{
-  width:100%; margin-top:12px; padding:11px 12px;
-  border:none; border-radius:10px;
-  font-weight:700; letter-spacing:.2px; color:#fff; cursor:pointer;
-  background:linear-gradient(180deg, #d84a43, #b73934);
-  box-shadow: 0 6px 18px rgba(184,56,51,.35), inset 0 1px 0 rgba(255,255,255,.22);
-}
-#${IDS.panel} .reset:hover{ filter:brightness(1.05); }
-
-/* open/close animation */
-#${IDS.panel}[data-open="0"]{ opacity:0; transform:translateY(-6px); pointer-events:none; }
-#${IDS.panel}[data-open="1"]{ opacity:1; transform:none; transition:opacity .16s ease, transform .16s ease; }
-`;
-    const style = document.createElement("style");
-    style.id = IDS.style;
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
-
-  function ensurePanel() {
-    let btn = $(IDS.btn);
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = IDS.btn;
-      btn.title = "Immersive Art Settings";
-      btn.textContent = "🎨";
-      ["mousedown","click"].forEach(ev => btn.addEventListener(ev, e => e.stopPropagation()));
-      document.body.appendChild(btn);
+  mountControls(
+    () => settings,
+    (next) => {
+      settings = next;
+      applySettings(settings);
+      saveSettings(settings);
     }
+  );
 
-    let panel = $(IDS.panel);
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = IDS.panel;
-      panel.setAttribute("data-open", "0");
-      ["mousedown","click"].forEach(ev => panel.addEventListener(ev, e => e.stopPropagation()));
+  disableImmersive();
 
-      const h = document.createElement("h3");
-      h.textContent = "Immersive Art BG";
-      panel.appendChild(h);
+  obs = new MutationObserver(() => disableImmersive());
+  obs.observe(document.body, { childList: true, subtree: true });
 
-      panel.appendChild(sliderRow("Blur",     0, 100, 1,    "blurPx"));
-      panel.appendChild(sliderRow("Dim",      0,   1, 0.01, "dim"));
-      panel.appendChild(sliderRow("Vignette", 0,   1, 0.01, "vignette"));
+  timer = setInterval(tick, CFG.pollMs);
+  tick();
 
-      const reset = document.createElement("button");
-      reset.className = "reset";
-      reset.textContent = "Reset to Defaults";
-      reset.onclick = () => {
-        cfg.blurPx = DEFAULTS.blurPx;
-        cfg.dim = DEFAULTS.dim;
-        cfg.vignette = DEFAULTS.vignette;
-        refreshRows(panel);
-        applyAll();
-      };
-      panel.appendChild(reset);
+  window.__ciderArtBgStop = () => {
 
-      document.body.appendChild(panel);
-    }
+    try {
+      if (timer) clearInterval(timer);
+    } catch {}
+    try {
+      if (obs) obs.disconnect();
+    } catch {}
+    timer = null;
+    obs = null;
 
-    const setOpen = (open) => $(IDS.panel).setAttribute("data-open", open ? "1" : "0");
-    btn.onclick = () => setOpen($(IDS.panel).getAttribute("data-open") !== "1");
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && $(IDS.panel).getAttribute("data-open") === "1") setOpen(false);
-    });
-  }
 
-  function sliderRow(label, min, max, step, key) {
-    const row = document.createElement("div");
-    row.className = "row";
+    try {
+      if (onDocClick) document.removeEventListener("click", onDocClick);
+    } catch {}
+    onDocClick = null;
 
-    const lab = document.createElement("label");
-    lab.textContent = label;
 
-    const input = document.createElement("input");
-    input.type = "range";
-    input.min = String(min);
-    input.max = String(max);
-    input.step = String(step);
-    input.value = String(cfg[key]);
-
-    const val = document.createElement("div");
-    val.className = "val";
-
-    const fmt = (x) => key === "blurPx" ? (Math.round(x) + "px") : String(Math.round(x * 100) / 100);
-    val.textContent = fmt(cfg[key]);
-
-    input.oninput = (e) => {
-      const v = parseFloat(e.target.value);
-      cfg[key] = key === "blurPx" ? clamp(Math.round(v), 0, 100) : clamp(v, 0, 1);
-      val.textContent = fmt(cfg[key]);
-      applyAll();
-    };
-
-    row.append(lab, input, val);
-    return row;
-  }
-
-  function refreshRows(panel) {
-    const vals = [cfg.blurPx, cfg.dim, cfg.vignette];
-    panel.querySelectorAll(".row").forEach((r, i) => {
-      const input = r.querySelector("input[type=range]");
-      const readout = r.querySelector(".val");
-      input.value = String(vals[i]);
-      readout.textContent = i === 0 ? (Math.round(vals[i]) + "px") : String(Math.round(vals[i] * 100) / 100);
-    });
-  }
-
-  // ---------- utils ----------
-  function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    try {
+      document.getElementById("cider-art-bg")?.remove();
+    } catch {}
+    try {
+      document.getElementById("cider-art-bg-style")?.remove();
+    } catch {}
+    try {
+      document.getElementById("cab-ui")?.remove();
+    } catch {}
+  };
 }
 
-export { P as default };
+function stop() {
+
+  try {
+    window.__ciderArtBgStop?.();
+  } catch {}
+
+
+  try {
+    delete window.__ciderArtBgStop;
+  } catch {}
+}
+
+
+const plugin = {
+  name: "Immersive Art BG",
+  version: "1.4.3",
+  start,
+  stop
+};
+
+export default plugin;
