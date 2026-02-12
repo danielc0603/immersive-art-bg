@@ -1,6 +1,6 @@
 # 🎨 Immersive Art BG
 
-**Version:** 1.4.3  
+**Version:** 1.4.7  
 **Author:** [@danielc0603](https://github.com/danielc0603)  
 **Compatibility:** Cider 1.4.2+ (macOS, Windows, Linux)
 
@@ -21,7 +21,6 @@ It automatically syncs with the currently playing track and applies a customizab
 ## ✨ Features
 
 - **Automatic album art detection** — syncs in real-time with the current track.  
-- **Liquid-glass background** — Attempting dynamically blurred backdrop with dim + vignette layers.  
 - **Customizable visual controls:**  
   - **Blur:** 0 – 100 px  
   - **Dim:** 0 – 1  
