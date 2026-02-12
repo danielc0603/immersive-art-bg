@@ -11,12 +11,45 @@ const DEFAULTS = {
 
 const CFG = { ...DEFAULTS };
 
-const NOW_PLAYING = "http://localhost:10767/api/v1/playback/now-playing";
+
+const NOW_PLAYING_FALLBACK = "http://127.0.0.1:10767/api/v1/playback/now-playing";
 
 const Z_BG = 2147483646;
 const Z_UI = 2147483647;
 
 const LS_KEY = "ciderArtBgSettings_v2";
+const DBG_KEY = "cabDebug";
+
+
+const dbgEnabled = () => {
+  try {
+    return localStorage.getItem(DBG_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+const dbg = (...args) => {
+  if (!dbgEnabled()) return;
+  console.log("[cab]", ...args);
+};
+
+
+function getHostWindow() {
+  const candidates = [window];
+  try {
+    if (window.parent && window.parent !== window) candidates.push(window.parent);
+  } catch {}
+  try {
+    if (window.top && window.top !== window) candidates.push(window.top);
+  } catch {}
+
+  for (const w of candidates) {
+    try {
+      if (w?.CiderApp) return w;
+    } catch {}
+  }
+  return window;
+}
 
 function loadSettings() {
   try {
@@ -43,12 +76,20 @@ function applySettings(s) {
   r.setProperty("--cab-br", String(s.brightness));
 }
 
-const resolveArtwork = (art) => {
-  if (!art?.url) return null;
-  const w = Math.max(CFG.minArt, Number(art.width) || 0);
-  const h = Math.max(CFG.minArt, Number(art.height) || 0);
-  return art.url.replace("{w}", String(w)).replace("{h}", String(h));
-};
+function normalizeArtworkUrl(art) {
+  if (!art) return null;
+  if (typeof art === "string") return art;
+
+  const url = art.url;
+  if (!url) return null;
+
+  if (url.includes("{w}") || url.includes("{h}")) {
+    const w = Math.max(CFG.minArt, Number(art.width) || 0);
+    const h = Math.max(CFG.minArt, Number(art.height) || 0);
+    return url.replace("{w}", String(w)).replace("{h}", String(h));
+  }
+  return url;
+}
 
 const preload = (url) =>
   new Promise((res, rej) => {
@@ -58,16 +99,21 @@ const preload = (url) =>
     img.src = url;
   });
 
-const makeKey = (info) => {
-  const pp = info?.playParams || {};
+function makeKey(info) {
+  const pp = info?.playParams || info?.attributes?.playParams || {};
+  const name = info?.name || info?.attributes?.name;
+  const artistName = info?.artistName || info?.attributes?.artistName;
+  const albumName = info?.albumName || info?.attributes?.albumName;
+  const dur = info?.durationInMillis || info?.attributes?.durationInMillis;
+
   return pp.catalogId
     ? `catalog:${pp.catalogId}`
     : pp.reportingId
     ? `reporting:${pp.reportingId}`
     : pp.id
     ? `id:${pp.id}`
-    : `${info?.name}|${info?.artistName}|${info?.albumName}|${info?.durationInMillis}`;
-};
+    : `${name}|${artistName}|${albumName}|${dur}`;
+}
 
 function disableImmersive() {
   const selectors = [
@@ -198,118 +244,12 @@ function ensureBgLayer(settings) {
       overflow: hidden;
     }
     #cab-panel.open { display:block; }
-
-    #cab-panel::before{
-      content:"";
-      position:absolute;
-      inset:0;
-      background: radial-gradient(circle at 20% 0%, rgba(255,255,255,0.10), transparent 45%),
-                  radial-gradient(circle at 90% 15%, rgba(255,255,255,0.07), transparent 40%);
-      pointer-events:none;
-    }
-
-    .cab-head{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      margin-bottom: 10px;
-      position: relative;
-      z-index: 1;
-    }
-    .cab-title{
-      display:flex;
-      flex-direction:column;
-      gap: 2px;
-    }
-    .cab-title .t1{
-      font-size: 13px;
-      font-weight: 650;
-      letter-spacing: 0.2px;
-      color: rgba(255,255,255,0.92);
-    }
-    .cab-title .t2{
-      font-size: 11px;
-      opacity: 0.65;
-    }
-
-    #cab-close{
-      width: 28px;
-      height: 28px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.06);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      cursor:pointer;
-      user-select:none;
-      transition: filter 120ms ease, transform 120ms ease, background 120ms ease;
-      position: relative;
-      z-index: 1;
-    }
-    #cab-close:hover{ filter: brightness(1.15); background: rgba(255,255,255,0.085); }
-    #cab-close:active{ transform: scale(0.96); }
-
-    .cab-grid{
-      display:grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .cab-row{
-      padding: 10px 10px 9px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.05);
-    }
-
-    .cab-row label{
-      font-size: 12px;
-      opacity: 0.9;
-      display:flex;
-      justify-content:space-between;
-      align-items:baseline;
-      margin-bottom: 8px;
-    }
-    .cab-row label span:last-child{
-      font-size: 11px;
-      opacity: 0.7;
-    }
-
-    .cab-row input[type="range"]{
-      width: 100%;
-      height: 18px;
-      background: transparent;
-      accent-color: rgba(255,255,255,0.92);
-    }
-
-    .cab-actions{
-      display:flex;
-      gap: 10px;
-      margin-top: 12px;
-      position: relative;
-      z-index: 1;
-    }
-    .cab-actions button{
-      flex: 1;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.07);
-      color: rgba(255,255,255,0.92);
-      padding: 10px 10px;
-      cursor: pointer;
-      transition: filter 120ms ease, transform 120ms ease, background 120ms ease;
-    }
-    .cab-actions button:hover{ filter: brightness(1.12); background: rgba(255,255,255,0.09); }
-    .cab-actions button:active{ transform: scale(0.98); }
   `;
   document.head.appendChild(style);
 
-  const bg = document.createElement("div");
-  bg.id = "cider-art-bg";
-  document.body.appendChild(bg);
+  const bgEl = document.createElement("div");
+  bgEl.id = "cider-art-bg";
+  document.body.appendChild(bgEl);
 
   const uiRoot =
     document.querySelector("#q-app") ||
@@ -322,7 +262,7 @@ function ensureBgLayer(settings) {
     uiRoot.style.setProperty("z-index", String(Z_UI), "important");
   }
 
-  return bg;
+  return bgEl;
 }
 
 function findTopRightSlot() {
@@ -344,7 +284,6 @@ function findTopRightSlot() {
       const parent = buttons[buttons.length - 1].parentElement || el;
       return parent;
     }
-
     return el;
   }
 
@@ -357,108 +296,62 @@ function findTopRightSlot() {
   return fallback;
 }
 
-// ---- runtime state ----
-let bg = null;
-let lastKey = null;
-let inFlight = false;
-let timer = null;
-let obs = null;
-let settings = null;
-
-
-let onDocClick = null;
-
-async function tick() {
-  if (inFlight) return;
-  inFlight = true;
-
-  try {
-    disableImmersive();
-
-    const data = await fetch(NOW_PLAYING).then((r) => r.json());
-    const info = data?.info;
-    if (!info) return;
-
-    const key = makeKey(info);
-    if (!key || key === lastKey) return;
-    lastKey = key;
-
-    const url = resolveArtwork(info.artwork);
-    if (!url) return;
-
-    await preload(url);
-
-    bg.style.opacity = "0";
-    setTimeout(() => {
-      bg.style.backgroundImage = `url("${url}")`;
-      bg.style.opacity = "1";
-      disableImmersive();
-    }, 70);
-  } catch (e) {
-    
-  } finally {
-    inFlight = false;
-  }
-}
-
 function mountControls(getSettings, setSettings) {
   document.getElementById("cab-ui")?.remove();
 
   const wrap = document.createElement("div");
   wrap.id = "cab-ui";
-
   wrap.innerHTML = `
     <button id="cab-btn" title="Background Settings">🎨</button>
     <div id="cab-panel">
-      <div class="cab-head">
-        <div class="cab-title">
-          <div class="t1">Background Settings</div>
-          <div class="t2">Live adjustments</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div>
+          <div style="font-size:13px; font-weight:650;">Background Settings</div>
+          <div style="font-size:11px; opacity:.65;">Live adjustments</div>
         </div>
-        <div id="cab-close">✕</div>
+        <button id="cab-close" style="width:28px;height:28px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;">✕</button>
       </div>
 
-      <div class="cab-grid">
-        <div class="cab-row">
-          <label><span>Blur</span><span id="val-blur"></span></label>
-          <input id="rng-blur" type="range" min="0" max="80" step="1">
+      <div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Blur</span><span id="val-blur"></span></label>
+          <input id="rng-blur" type="range" min="0" max="80" step="1" style="width:100%;">
         </div>
 
-        <div class="cab-row">
-          <label><span>Dim</span><span id="val-dim"></span></label>
-          <input id="rng-dim" type="range" min="0" max="0.85" step="0.01">
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Dim</span><span id="val-dim"></span></label>
+          <input id="rng-dim" type="range" min="0" max="0.85" step="0.01" style="width:100%;">
         </div>
 
-        <div class="cab-row">
-          <label><span>Vignette</span><span id="val-vig"></span></label>
-          <input id="rng-vig" type="range" min="0" max="0.9" step="0.01">
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Vignette</span><span id="val-vig"></span></label>
+          <input id="rng-vig" type="range" min="0" max="0.9" step="0.01" style="width:100%;">
         </div>
 
-        <div class="cab-row">
-          <label><span>Saturation</span><span id="val-sat"></span></label>
-          <input id="rng-sat" type="range" min="0" max="1.6" step="0.01">
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Saturation</span><span id="val-sat"></span></label>
+          <input id="rng-sat" type="range" min="0" max="1.6" step="0.01" style="width:100%;">
         </div>
 
-        <div class="cab-row">
-          <label><span>Contrast</span><span id="val-ct"></span></label>
-          <input id="rng-ct" type="range" min="0.6" max="1.6" step="0.01">
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Contrast</span><span id="val-ct"></span></label>
+          <input id="rng-ct" type="range" min="0.6" max="1.6" step="0.01" style="width:100%;">
         </div>
 
-        <div class="cab-row">
-          <label><span>Brightness</span><span id="val-br"></span></label>
-          <input id="rng-br" type="range" min="0.6" max="1.6" step="0.01">
+        <div style="margin-bottom:12px;">
+          <label style="font-size:12px; display:flex; justify-content:space-between;"><span>Brightness</span><span id="val-br"></span></label>
+          <input id="rng-br" type="range" min="0.6" max="1.6" step="0.01" style="width:100%;">
         </div>
-      </div>
 
-      <div class="cab-actions">
-        <button id="cab-reset">Reset</button>
-        <button id="cab-hide">Hide UI</button>
+        <div style="display:flex; gap:10px;">
+          <button id="cab-reset" style="flex:1;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:rgba(255,255,255,.92);padding:10px;cursor:pointer;">Reset</button>
+          <button id="cab-hide"  style="flex:1;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:rgba(255,255,255,.92);padding:10px;cursor:pointer;">Hide UI</button>
+        </div>
       </div>
     </div>
   `;
 
-  const slot = findTopRightSlot();
-  slot.appendChild(wrap);
+  findTopRightSlot().appendChild(wrap);
 
   const panel = wrap.querySelector("#cab-panel");
   const btn = wrap.querySelector("#cab-btn");
@@ -491,17 +384,17 @@ function mountControls(getSettings, setSettings) {
   btn.addEventListener("click", () => panel.classList.toggle("open"));
   close.addEventListener("click", () => panel.classList.remove("open"));
 
-
-  try {
-    if (onDocClick) document.removeEventListener("click", onDocClick);
-  } catch {}
+  if (onDocClick) {
+    try {
+      document.removeEventListener("click", onDocClick);
+    } catch {}
+  }
 
   onDocClick = (e) => {
     if (!panel.classList.contains("open")) return;
     if (wrap.contains(e.target)) return;
     panel.classList.remove("open");
   };
-
   document.addEventListener("click", onDocClick);
 
   q("#rng-blur").addEventListener("input", (e) => update({ blurPx: Number(e.target.value) }));
@@ -517,7 +410,151 @@ function mountControls(getSettings, setSettings) {
   syncUI(getSettings());
 }
 
-export function start() {
+
+let bg = null;
+let lastKey = null;
+let inFlight = false;
+let timer = null;
+let obs = null;
+let settings = null;
+let onDocClick = null;
+let started = false;
+let rpcUnsub = null;
+
+
+async function getNowPlayingInfo() {
+  const host = getHostWindow();
+  const rpc = host?.CiderApp?.RPC;
+
+  const npa = rpc?.nowPlayingAttributes;
+
+  if (npa != null) {
+    // Debug the shape to confirm what's happening in your build
+    dbg("rpc.nowPlayingAttributes typeof", typeof npa);
+
+    // Case 1: function
+    if (typeof npa === "function") {
+      const data = await npa.call(rpc);
+      return data?.attributes ? data.attributes : data;
+    }
+
+    // Case 2: object/proxy
+    if (typeof npa === "object") {
+      const data = npa;
+      return data?.attributes ? data.attributes : data;
+    }
+  }
+
+  // Fallback: local API (may 403)
+  const resp = await fetch(NOW_PLAYING_FALLBACK);
+  if (!resp.ok) throw new Error(`now-playing fallback failed: ${resp.status}`);
+  const json = await resp.json();
+  return json?.info || null;
+}
+
+function extractArtworkUrl(info) {
+  const art = info?.artwork || info?.attributes?.artwork || null;
+  return normalizeArtworkUrl(art);
+}
+
+async function applyArtworkUrl(url, why) {
+  if (!bg || !url) return;
+
+  await preload(url);
+
+  bg.style.opacity = "0";
+  setTimeout(() => {
+    if (!bg) return;
+    bg.style.backgroundImage = `url("${url}")`;
+    bg.style.opacity = "1";
+    disableImmersive();
+    dbg("bg updated", why, url);
+  }, 70);
+}
+
+async function tick(reason = "poll") {
+  if (!started || inFlight || !bg) return;
+  inFlight = true;
+
+  try {
+    disableImmersive();
+
+    const info = await getNowPlayingInfo();
+    if (!info) {
+      dbg("no nowPlaying info", reason);
+      return;
+    }
+
+    const key = makeKey(info);
+    const url = extractArtworkUrl(info);
+
+    dbg("tick", reason, { key, hasUrl: !!url });
+
+    if (!key || key === lastKey) return;
+    lastKey = key;
+
+    if (!url) return;
+
+    await applyArtworkUrl(url, reason);
+  } catch (e) {
+    dbg("tick error", reason, e?.message || e);
+  } finally {
+    inFlight = false;
+  }
+}
+
+
+function trySubscribeRPC() {
+  const host = getHostWindow();
+  const rpc = host?.CiderApp?.RPC;
+  if (!rpc) return null;
+
+
+  try {
+    if (typeof rpc.on === "function") {
+      const off1 = rpc.on("nowPlayingItemDidChange", () => tick("rpc:event"));
+      const off2 = rpc.on("playbackStateDidChange", () => tick("rpc:event"));
+      return () => {
+        try {
+          if (typeof off1 === "function") off1();
+          if (typeof off2 === "function") off2();
+        } catch {}
+      };
+    }
+  } catch {}
+
+  try {
+    if (typeof rpc.addEventListener === "function") {
+      const cb = () => tick("rpc:event");
+      rpc.addEventListener("nowPlayingItemDidChange", cb);
+      rpc.addEventListener("playbackStateDidChange", cb);
+      return () => {
+        try {
+          rpc.removeEventListener("nowPlayingItemDidChange", cb);
+          rpc.removeEventListener("playbackStateDidChange", cb);
+        } catch {}
+      };
+    }
+  } catch {}
+
+  try {
+    if (typeof rpc.subscribe === "function") {
+      const off = rpc.subscribe(() => tick("rpc:subscribe"));
+      return () => {
+        try {
+          if (typeof off === "function") off();
+        } catch {}
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
+function start() {
+  if (started) return;
+  started = true;
+
   settings = loadSettings();
   bg = ensureBgLayer(settings);
   applySettings(settings);
@@ -536,57 +573,72 @@ export function start() {
   obs = new MutationObserver(() => disableImmersive());
   obs.observe(document.body, { childList: true, subtree: true });
 
-  timer = setInterval(tick, CFG.pollMs);
-  tick();
+  rpcUnsub = trySubscribeRPC();
+  dbg("started", { rpcSubscribed: !!rpcUnsub, pollMs: CFG.pollMs });
 
-  window.__ciderArtBgStop = () => {
-
-    try {
-      if (timer) clearInterval(timer);
-    } catch {}
-    try {
-      if (obs) obs.disconnect();
-    } catch {}
-    timer = null;
-    obs = null;
-
-
-    try {
-      if (onDocClick) document.removeEventListener("click", onDocClick);
-    } catch {}
-    onDocClick = null;
-
-
-    try {
-      document.getElementById("cider-art-bg")?.remove();
-    } catch {}
-    try {
-      document.getElementById("cider-art-bg-style")?.remove();
-    } catch {}
-    try {
-      document.getElementById("cab-ui")?.remove();
-    } catch {}
-  };
+  timer = setInterval(() => tick("poll"), CFG.pollMs);
+  tick("start");
 }
 
 function stop() {
+  started = false;
 
   try {
-    window.__ciderArtBgStop?.();
+    if (timer) clearInterval(timer);
   } catch {}
-
+  timer = null;
 
   try {
-    delete window.__ciderArtBgStop;
+    if (obs) obs.disconnect();
   } catch {}
+  obs = null;
+
+  try {
+    if (rpcUnsub) rpcUnsub();
+  } catch {}
+  rpcUnsub = null;
+
+  try {
+    if (onDocClick) document.removeEventListener("click", onDocClick);
+  } catch {}
+  onDocClick = null;
+
+  try {
+    document.getElementById("cider-art-bg")?.remove();
+  } catch {}
+  try {
+    document.getElementById("cider-art-bg-style")?.remove();
+  } catch {}
+  try {
+    document.getElementById("cab-ui")?.remove();
+  } catch {}
+
+  bg = null;
+  lastKey = null;
+  dbg("stopped");
 }
 
 
-const plugin = {
-  name: "Immersive Art BG",
-  version: "1.4.3",
-  start,
-  stop
-};
+function setup() {
+  // Debug signal: module was imported and setup() ran
+  try {
+    const enabled = localStorage.getItem("cabDebug") === "1";
+    if (enabled) console.log("[cab] setup() called, autostarting");
+  } catch {}
 
-export default plugin;
+  // Autostart (some hosts never call start() explicitly)
+  setTimeout(() => {
+    try { start(); } catch (e) {
+      try { console.log("[cab] autostart error", e); } catch {}
+    }
+  }, 0);
+
+  return { start, stop };
+}
+
+export default {
+  identifier: "com.danielc0603.immersiveartbg",
+  name: "Immersive Art BG",
+  version: "1.4.7",
+  setup
+};

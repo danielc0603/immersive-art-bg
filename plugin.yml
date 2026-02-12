@@ -1,7 +1,7 @@
 identifier: com.danielc0603.immersiveartbg
 name: Immersive Art BG
 description: Blurred album art as immersive background
-version: 1.4.3
+version: 1.4.7
 author: Daniel
 repo: https://github.com/danielc0603/immersive-art-bg
 main: plugin.js
